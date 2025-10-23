@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>障害物コレクター</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.8.0/p5.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.1.3/socket.io.js"></script>
+    <style>
+      body {
+        font-family: sans-serif;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+      }
+      #game-info {
+        display: flex;
+        justify-content: space-between;
+        width: 500px;
+        font-size: 1.2em;
+        margin-bottom: 10px;
+      }
+      #controls {
+        margin-top: 10px;
+      }
+      button {
+        padding: 10px 20px;
+        font-size: 1em;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>障害物コレクター</h1>
+    <div>
+      <div>あなたのID: <span id="myid"></span></div>
+      <div>スマホで<a href="/smart.html" target="_blank">こちらのページ</a>を開き、「接続」ボタンを押して操作してください。</div>
+    </div>
+
+    <div id="game-info">
+      <div>スコア: <span id="score">0</span></div>
+      <div>残り時間: <span id="timer">20</span></div>
+    </div>
+
+    <div id="canvas-container"></div>
+
+    <div id="controls">
+      <button id="start-btn">ゲーム開始</button>
+      <button id="restart-btn" style="display: none;">もう一度プレイ</button>
+    </div>
+
+    <script>
+      const socket = io.connect();
+
+      // --- 変数定義 ---
+      let myid = sessionStorage.getItem('clientId');
+      if (!myid) {
+        myid = Math.random().toString(36).substring(2, 15);
+        sessionStorage.setItem('clientId', myid);
+      }
+
+      // センサーデータ
+      let g = 0; // gamma (左右)
+      let b = 0; // beta (前後)
+
+      // ゲーム状態
+      let gameStarted = false;
+      let gameOver = false;
+      const GAME_DURATION = 20; // ゲーム時間（秒）
+      let timeLeft = GAME_DURATION;
+      let score = 0;
+      let startTime;
+
+      // ゲームオブジェクト
+      let player;
+      let obstacles = [];
+      const NUM_OBSTACLES = 5;
+
+      // DOM要素
+      const myIdSpan = document.querySelector("#myid");
+      const startBtn = document.querySelector("#start-btn");
+      const restartBtn = document.querySelector("#restart-btn");
+      const scoreSpan = document.querySelector("#score");
+      const timerSpan = document.querySelector("#timer");
+
+      // --- 初期設定 ---
+      myIdSpan.innerHTML = myid;
+
+      startBtn.addEventListener("click", () => {
+        socket.emit("join", "game");
+        gameStarted = true;
+        gameOver = false;
+        startTime = millis();
+        startBtn.style.display = "none";
+        loop(); // p5.jsの描画ループを開始
+      });
+
+      restartBtn.addEventListener("click", () => {
+        resetGame();
+        restartBtn.style.display = "none";
+        startBtn.style.display = "block";
+      });
+
+      socket.on("sensor", (data) => {
+        g = parseFloat(data.g);
+        b = parseFloat(data.b);
+      });
+
+      // --- p5.js ---
+      function setup() {
+        const canvas = createCanvas(500, 500);
+        canvas.parent('canvas-container');
+        player = { x: width / 2, y: height / 2, size: 30 };
+        for (let i = 0; i < NUM_OBSTACLES; i++) {
+          obstacles.push({ x: random(width), y: random(height), size: 20 });
+        }
+        textAlign(CENTER, CENTER);
+        textSize(32);
+        noLoop(); // ゲーム開始まで描画を停止
+      }
+
+      function draw() {
+        if (!gameStarted) {
+          background(220);
+          text("「ゲーム開始」ボタンを押してください", width / 2, height / 2);
+          return;
+        }
+
+        background(240);
+
+        // プレイヤーの更新と描画
+        player.x += g * 0.2;
+        player.y += b * 0.2;
+        player.x = constrain(player.x, 0, width); // 画面外に出ないように
+        player.y = constrain(player.y, 0, height);
+        fill(0, 100, 255);
+        noStroke();
+        ellipse(player.x, player.y, player.size, player.size);
+
+        // 障害物の描画と当たり判定
+        for (let obs of obstacles) {
+          fill(255, 0, 0);
+          ellipse(obs.x, obs.y, obs.size, obs.size);
+          if (dist(player.x, player.y, obs.x, obs.y) < (player.size + obs.size) / 2) {
+            score++;
+            scoreSpan.textContent = score;
+            obs.x = random(width);
+            obs.y = random(height);
+          }
+        }
+
+        // タイマー更新
+        timeLeft = GAME_DURATION - (millis() - startTime) / 1000;
+        if (timeLeft <= 0) {
+          timeLeft = 0;
+          gameOver = true;
+          gameStarted = false;
+          noLoop(); // ゲームオーバーで描画停止
+          background(100);
+          fill(255);
+          text(`ゲームオーバー！\nスコア: ${score}`, width / 2, height / 2);
+          restartBtn.style.display = "block";
+        }
+        timerSpan.textContent = Math.ceil(timeLeft);
+      }
+
+      function resetGame() {
+        score = 0;
+        timeLeft = GAME_DURATION;
+        scoreSpan.textContent = score;
+        timerSpan.textContent = timeLeft;
+        player.x = width / 2;
+        player.y = height / 2;
+        for (let obs of obstacles) {
+          obs.x = random(width);
+          obs.y = random(height);
+        }
+        redraw(); // 初期状態を一度描画
+      }
+    </script>
+  </body>
+</html>
